@@ -32,7 +32,7 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
       myClient.write((const uint8_t *)mainbuffer, strlen(mainbuffer));
       myClient.flush();
       
-      while(!myClient.available() && (millis() - startTime) < 5000){
+      while(!myClient.available() && (millis() - startTime) < REQUEST_TIMEOUT){
           SPARK_WLAN_Loop();
       };
       
@@ -62,7 +62,7 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
    finally sendRequest(..) is called to actually execute the request
    
    PARAMETERS:
-    type: 0 = GET, 1 = POST
+    type: 0 = GET, 1 = POST, 2 = PUT
     url: Path to the request
     host: bytefield with length of 4
           containing the bytes of the hosts IP
@@ -105,6 +105,8 @@ int HTTPClient::makeRequest(unsigned short type,
     sprintf(mainbuffer, "GET ");
   } else if (type==1) {
     sprintf(mainbuffer, "POST ");    
+  } else if (type==2) {
+    sprintf(mainbuffer, "PUT ");
   } else {
     // undefined request type
     // return
