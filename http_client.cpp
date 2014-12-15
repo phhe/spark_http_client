@@ -9,6 +9,26 @@
 /*----------------------------------------------------------------------*/
 
 
+
+//
+// Receive HTTP Response
+//
+// The first value of client.available() might not represent the
+// whole response, so after the first chunk of data is received instead
+// of terminating the connection there is a delay and another attempt
+// to read data.
+// The loop exits when the connection is closed, or if there is a
+// timeout or an error.
+
+unsigned int responsePosition = 0;
+unsigned long lastRead = millis();
+unsigned long firstRead = millis();
+bool error = false;
+bool timeout = false;
+
+//#define LOGGING
+
+
 /* Ethernet control */
 TCPClient       myClient; 
 
@@ -24,7 +44,7 @@ HTTPClient::HTTPClient()
 {
 }
 
-int sendRequest (byte* host, unsigned short port, char* response, unsigned short responseSize) 
+int sendRequest (byte* host, unsigned short port, char* response, unsigned short responseSize, bool storeResponseHeader) 
 {
   if (myClient.connect(host, port)) {
       uint32_t startTime = millis();
@@ -32,24 +52,60 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
       myClient.write((const uint8_t *)mainbuffer, strlen(mainbuffer));
       myClient.flush();
       
+      
+      // wait for the other side to become available
       while(!myClient.available() && (millis() - startTime) < REQUEST_TIMEOUT){
-          SPARK_WLAN_Loop();
+          // not sure if it is a good thing to let our
+          // local tcp activity be interrupted by cloud stuff...
+          delay(1);
+          //SPARK_WLAN_Loop();
       };
       
-      while(myClient.available()) {
-          readbytes = myClient.read((uint8_t*) response, responseSize);
-          if (readbytes == -1) break;
+      responsePosition=0;
+      int bytes = myClient.available();
+      bool inBody = storeResponseHeader;
+      
+      char previous_c = '\0';
+      char current_c = '\0';
+      
+      // loop as long as there is data
+      while (bytes > 0) {
+          // get number of available bytes
+          
+          // todo catch overflow here, after i<bytes
+          for (int i = 0; i < bytes; i++) {
+            current_c =  myClient.read();
+            
+            // detect the empty line between header and response
+            if (!inBody && current_c == '\r' && previous_c == '\n') {
+              inBody = TRUE;
+            }
+            
+            if (inBody) {
+              response[responsePosition++] = current_c;
+            }
+            previous_c = current_c;
+          }
+          
+          // this does not work - there seems to be something wrong with the read(buffer,len)
+          // maybe a future firmware version will fix this...
+          // readbytes = myClient.read((uint8_t*) response, bytes);
+          
+          bytes = myClient.available();
       }
+      
+      Serial.print("Received: ");
+      Serial.println(responsePosition);
       
       myClient.flush();
       myClient.stop();
-      
+
+
   } else {
       // unable to connect
       return 1; 
   }
-  
-  return 0;
+  return responsePosition;
 }
 
 
@@ -69,12 +125,18 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
     keepAlive: boolean, send keep-alive otherwise send close
     userHeader1, userHeader2 additional headers, use empty string to skip
     content: the requests content
-    //TODO: add parameter to make the requests flush() instead of read()
-    
+    response: buffer to store the response
+    responseSize: size of the response buffer
+    storeResponseHeader: wheter while reading it shall be tried
+                         to only receive the body, detect for '\r\n\r\n'.
+                         might not work in all cases, but might 
+                         helt to reduce memory usage.
+
     HISTORY:
       12/7/14 PHHE
-          Creted the method.
-
+          Created the method.
+      12/15/14 PHHE
+          Added option to ignore the header
 
 */
 
@@ -89,13 +151,15 @@ int HTTPClient::makeRequest(unsigned short type,
                 const char* userHeader2, 
                 const char* content,
                 char* response,
-                unsigned short responseSize)
+                unsigned short responseSize,
+                bool storeResponseHeader)
 {
   
   // clear both buffers
   //TODO there was a & in front of smallbuffer
   memset(&smallbuffer, 0, sizeof(smallbuffer));
   memset(&mainbuffer, 0, sizeof(mainbuffer));
+  memset(response, 0, responseSize);
   
   
   
@@ -158,65 +222,6 @@ int HTTPClient::makeRequest(unsigned short type,
   
   // actually send the stored request
   // return the return value of the send method
-  return sendRequest(host, port, response, responseSize);
+  return sendRequest(host, port, response, responseSize, storeResponseHeader);
   
-}
-
-
-
-
-// additional methods to parse responses
-// xml parser:
-
-// # simple parsing of the responses ------------------------------
-//
-// find <element>X</element> and return X as a String
-//
-String getXMLElementContent(String input, String element)
-{
-    // make open and close string
-    String elementOpen = "<" + element + ">";
-    String elementClose = "</" + element + ">";
-    
-    // get positions of open and close
-    int openPos = input.indexOf(elementOpen);
-    int closePos = input.indexOf(elementClose);
-    
-    #ifdef SERIALDEBUGPARSER
-        Serial.print("[INF] Input length: ");
-        Serial.println(input.length());
-        Serial.println("[INF] Elements:");
-        Serial.println(elementOpen);
-        Serial.println(elementClose);
-        Serial.println("[INF] Positions:");
-        Serial.println(openPos);
-        Serial.println(closePos);
-    #endif // SERIALDEBUG
-    
-	
-    // verify if open and close can be found in the input
-    if (openPos == -1 || closePos == -1) {
-		Serial.println("[ERR] can not find element in input");
-		return NULL;
-	}
-    
-    // idx: starts at index of element + length of element + tags
-    int idx = openPos + elementOpen.length();
- 
-    // check if length is above 0
-    if (closePos - idx > 0) {
-        #ifdef SERIALDEBUGPARSER
-            Serial.print("[INF] Output length: ");
-            Serial.println((input.substring(idx,  closePos)).length());
-        #endif
-        return input.substring(idx,  closePos);
-
-    } else {
-        #ifdef SERIALDEBUGPARSER
-            Serial.println("[ERR] idx seems wrong");
-        #endif
-        return NULL;
-        
-    }
-    
 }

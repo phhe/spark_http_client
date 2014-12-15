@@ -27,8 +27,8 @@ public:
                   const char* userHeader2, 
                   const char* content,
                   char* response,
-                  unsigned short responseSize);
-  
+                  unsigned short responseSize, 
+                  bool storeResponseHeader);
 };
 
 
