@@ -8,19 +8,6 @@
 /* Global variables */
 /*----------------------------------------------------------------------*/
 
-
-
-//
-// Receive HTTP Response
-//
-// The first value of client.available() might not represent the
-// whole response, so after the first chunk of data is received instead
-// of terminating the connection there is a delay and another attempt
-// to read data.
-// The loop exits when the connection is closed, or if there is a
-// timeout or an error.
-
-unsigned int responsePosition = 0;
 unsigned long lastRead = millis();
 unsigned long firstRead = millis();
 bool error = false;
@@ -40,12 +27,27 @@ char smallbuffer[85];
 static const uint16_t REQUEST_TIMEOUT = 5000; // Allow maximum 5s between data packets.
 int readbytes=0;
 
+//
+// Receive HTTP Response
+//
+// The first value of client.available() might not represent the
+// whole response, so after the first chunk of data is received instead
+// of terminating the connection there is a delay and another attempt
+// to read data.
+// The loop exits when the connection is closed, or if there is a
+// timeout or an error.
+
+
+
 HTTPClient::HTTPClient()
 {
 }
 
 int sendRequest (byte* host, unsigned short port, char* response, unsigned short responseSize, bool storeResponseHeader) 
 {
+  // this is the position in the response buffer
+  short responsePosition=0;
+  
   if (myClient.connect(host, port)) {
       uint32_t startTime = millis();
       
@@ -57,26 +59,61 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
       while(!myClient.available() && (millis() - startTime) < REQUEST_TIMEOUT){
           // not sure if it is a good thing to let our
           // local tcp activity be interrupted by cloud stuff...
-          delay(1);
-          //SPARK_WLAN_Loop();
+         //delay(1);
+         SPARK_WLAN_Loop();
       };
-      
-      responsePosition=0;
-      int bytes = myClient.available();
-      bool inBody = storeResponseHeader;
-      
+
+      // previous_c is used to recognize blanc line
+      // intention is to seperate header from response body
       char previous_c = '\0';
+      
+      // current_c is where we store the current character
+      // read from the TCPClients buffer
       char current_c = '\0';
       
+      // responsePosition might differ from the 
+      // currentPosition read from the TCPClients buffer
+      // also it it will not be increased unless we reach 
+      // the body, therefore we use currentPosition to store
+      // the overall position read from the TCPClient
+      short currentPosition=0;
+      
+      // flag used to seperate header from body
+      // gets initiated with storeResponseHeader
+      // so we assume to be already in the Body 
+      // in case we shall return the whole response
+      bool inBody = storeResponseHeader;
+      
+      
+      // read the number of available bytes 
+      int bytes = myClient.available();
+      
+      
       // loop as long as there is data
-      while (bytes > 0) {
+      while (bytes > 0 && !error) {
           // get number of available bytes
           
           // todo catch overflow here, after i<bytes
-          for (int i = 0; i < bytes; i++) {
+          for (int i = 0; i < bytes && !error; i++) {
             current_c =  myClient.read();
             
-            // detect the empty line between header and response
+            // HTTP Status Code is expected to start at position 10
+            // Only "200 OK" is defined in the range from 200-299,
+            // so if we find a 2 at this position we can assume, that
+            // we got a "200 OK", little dity but better than nothing
+            // and fastv ;)
+            if(!inBody && currentPosition==9 && current_c != '2') {
+              
+              #ifdef SERIAL_DEBUG
+              Serial.println("HTTP Error Code != 200");
+              Serial.println(current_c);
+              #endif /* SERIAL_DEBUG */
+              
+              error = TRUE;
+              break;
+            }
+            
+            //detect the empty line between header and response
             if (!inBody && current_c == '\r' && previous_c == '\n') {
               inBody = TRUE;
             }
@@ -84,12 +121,17 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
             if (inBody) {
               response[responsePosition++] = current_c;
             }
+            
+            currentPosition++;
             previous_c = current_c;
           }
           
-          // this does not work - there seems to be something wrong with the read(buffer,len)
+          // this alternative for reading seems not work
           // maybe a future firmware version will fix this...
-          // readbytes = myClient.read((uint8_t*) response, bytes);
+          // might be faster, but never the less with the problem that splitting 
+          // header from body and parsing for error codes right here will no longer be possible 
+          // readbytes = myClient.read((uint8_t*) &response[responsePosition], bytes);
+          // responsePosition = responsePosition + bytes;
           
           bytes = myClient.available();
       }
@@ -99,11 +141,14 @@ int sendRequest (byte* host, unsigned short port, char* response, unsigned short
       
       myClient.flush();
       myClient.stop();
-
+      
+      if (error) {
+        return -1;
+      }
 
   } else {
       // unable to connect
-      return 1; 
+      return -1; 
   }
   return responsePosition;
 }
