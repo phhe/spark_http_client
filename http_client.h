@@ -1,20 +1,37 @@
 #ifndef __HTTPCLIENT_H
 #define __HTTPCLIENT_H
 
-//#include "allduino.h"
-//#include <stdlib.h>
-#include "spark_wiring_tcpclient.h"
 #include "application.h"
+#include "spark_wiring_tcpclient.h"
 
 
 /*----------------------------------------------------------------------*/
 /* Macros and constants */
 /*----------------------------------------------------------------------*/
 
+#define REQUEST_LEN 800
 
 
-class HTTPClient 
-{
+class HTTPClient {
+  
+
+/* Ethernet control */
+TCPClient  myClient; 
+
+
+unsigned long lastRead  = millis();
+unsigned long firstRead = millis();
+bool error   = false;
+bool timeout = false;
+
+
+// response mainbuffer
+char mainbuffer[1024];
+char smallbuffer[85];
+
+// Allow maximum 5s between data packets.
+static const uint16_t REQUEST_TIMEOUT = 5000;
+int readbytes=0;
 
 public:
 	HTTPClient();
@@ -30,6 +47,10 @@ public:
                   char* response,
                   unsigned short responseSize, 
                   bool storeResponseHeader);
+                  
+private:
+  int sendRequest (byte* host, unsigned short port, char* response, unsigned short responseSize, bool storeResponseHeader) ;
+
 };
 
 

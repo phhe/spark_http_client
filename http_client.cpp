@@ -1,32 +1,5 @@
 #include "http_client.h"
 
-#define DEBUG_SONOS
-#define REQUEST_LEN 800
-
-
-/*----------------------------------------------------------------------*/
-/* Global variables */
-/*----------------------------------------------------------------------*/
-
-unsigned long lastRead = millis();
-unsigned long firstRead = millis();
-bool error = false;
-bool timeout = false;
-
-//#define LOGGING
-
-
-/* Ethernet control */
-TCPClient       myClient; 
-
-// response mainbuffer
-char mainbuffer[1024];
-char smallbuffer[85];
-
-
-static const uint16_t REQUEST_TIMEOUT = 5000; // Allow maximum 5s between data packets.
-int readbytes=0;
-
 //
 // Receive HTTP Response
 //
@@ -42,117 +15,6 @@ int readbytes=0;
 HTTPClient::HTTPClient()
 {
 }
-
-int sendRequest (byte* host, unsigned short port, char* response, unsigned short responseSize, bool storeResponseHeader) 
-{
-  // this is the position in the response buffer
-  short responsePosition=0;
-  
-  if (myClient.connect(host, port)) {
-      uint32_t startTime = millis();
-      
-      myClient.write((const uint8_t *)mainbuffer, strlen(mainbuffer));
-      myClient.flush();
-      
-      
-      // wait for the other side to become available
-      while(!myClient.available() && (millis() - startTime) < REQUEST_TIMEOUT){
-          // not sure if it is a good thing to let our
-          // local tcp activity be interrupted by cloud stuff...
-         //delay(1);
-         SPARK_WLAN_Loop();
-      };
-
-      // previous_c is used to recognize blanc line
-      // intention is to seperate header from response body
-      char previous_c = '\0';
-      
-      // current_c is where we store the current character
-      // read from the TCPClients buffer
-      char current_c = '\0';
-      
-      // responsePosition might differ from the 
-      // currentPosition read from the TCPClients buffer
-      // also it it will not be increased unless we reach 
-      // the body, therefore we use currentPosition to store
-      // the overall position read from the TCPClient
-      short currentPosition=0;
-      
-      // flag used to seperate header from body
-      // gets initiated with storeResponseHeader
-      // so we assume to be already in the Body 
-      // in case we shall return the whole response
-      bool inBody = storeResponseHeader;
-      
-      
-      // read the number of available bytes 
-      int bytes = myClient.available();
-      
-      
-      // loop as long as there is data
-      while (bytes > 0 && !error) {
-          // get number of available bytes
-          
-          // todo catch overflow here, after i<bytes
-          for (int i = 0; i < bytes && !error; i++) {
-            current_c =  myClient.read();
-            
-            // HTTP Status Code is expected to start at position 10
-            // Only "200 OK" is defined in the range from 200-299,
-            // so if we find a 2 at this position we can assume, that
-            // we got a "200 OK", little dity but better than nothing
-            // and fastv ;)
-            if(!inBody && currentPosition==9 && current_c != '2') {
-              
-              #ifdef SERIAL_DEBUG
-              Serial.println("HTTP Error Code != 200");
-              Serial.println(current_c);
-              #endif /* SERIAL_DEBUG */
-              
-              error = TRUE;
-              break;
-            }
-            
-            //detect the empty line between header and response
-            if (!inBody && current_c == '\r' && previous_c == '\n') {
-              inBody = TRUE;
-            }
-            
-            if (inBody) {
-              response[responsePosition++] = current_c;
-            }
-            
-            currentPosition++;
-            previous_c = current_c;
-          }
-          
-          // this alternative for reading seems not work
-          // maybe a future firmware version will fix this...
-          // might be faster, but never the less with the problem that splitting 
-          // header from body and parsing for error codes right here will no longer be possible 
-          // readbytes = myClient.read((uint8_t*) &response[responsePosition], bytes);
-          // responsePosition = responsePosition + bytes;
-          
-          bytes = myClient.available();
-      }
-      
-      Serial.print("Received: ");
-      Serial.println(responsePosition);
-      
-      myClient.flush();
-      myClient.stop();
-      
-      if (error) {
-        return -1;
-      }
-
-  } else {
-      // unable to connect
-      return -1; 
-  }
-  return responsePosition;
-}
-
 
 
 /*----------------------------------------------------------------------*/
@@ -270,3 +132,115 @@ int HTTPClient::makeRequest(unsigned short type,
   return sendRequest(host, port, response, responseSize, storeResponseHeader);
   
 }
+
+
+int HTTPClient::sendRequest (byte* host, unsigned short port, char* response, unsigned short responseSize, bool storeResponseHeader) 
+{
+  // this is the position in the response buffer
+  short responsePosition=0;
+  
+  if (myClient.connect(host, port)) {
+      uint32_t startTime = millis();
+      
+      myClient.write((const uint8_t *)mainbuffer, strlen(mainbuffer));
+      myClient.flush();
+      
+      
+      // wait for the other side to become available
+      while(!myClient.available() && (millis() - startTime) < REQUEST_TIMEOUT){
+          // not sure if it is a good thing to let our
+          // local tcp activity be interrupted by cloud stuff...
+         //delay(1);
+         SPARK_WLAN_Loop();
+      };
+
+      // previous_c is used to recognize blanc line
+      // intention is to seperate header from response body
+      char previous_c = '\0';
+      
+      // current_c is where we store the current character
+      // read from the TCPClients buffer
+      char current_c = '\0';
+      
+      // responsePosition might differ from the 
+      // currentPosition read from the TCPClients buffer
+      // also it it will not be increased unless we reach 
+      // the body, therefore we use currentPosition to store
+      // the overall position read from the TCPClient
+      short currentPosition=0;
+      
+      // flag used to seperate header from body
+      // gets initiated with storeResponseHeader
+      // so we assume to be already in the Body 
+      // in case we shall return the whole response
+      bool inBody = storeResponseHeader;
+      
+      
+      // read the number of available bytes 
+      int bytes = myClient.available();
+      
+      
+      // loop as long as there is data
+      while (bytes > 0 && !error) {
+          // get number of available bytes
+          
+          // todo catch overflow here, after i<bytes
+          for (int i = 0; i < bytes && !error; i++) {
+            current_c =  myClient.read();
+            
+            // HTTP Status Code is expected to start at position 10
+            // Only "200 OK" is defined in the range from 200-299,
+            // so if we find a 2 at this position we can assume, that
+            // we got a "200 OK", little dity but better than nothing
+            // and fastv ;)
+            if(!inBody && currentPosition==9 && current_c != '2') {
+              
+              #ifdef SERIAL_DEBUG
+              Serial.println("HTTP Error Code != 200");
+              Serial.println(current_c);
+              #endif /* SERIAL_DEBUG */
+              
+              error = TRUE;
+              break;
+            }
+            
+            //detect the empty line between header and response
+            if (!inBody && current_c == '\r' && previous_c == '\n') {
+              inBody = TRUE;
+            }
+            
+            if (inBody) {
+              response[responsePosition++] = current_c;
+            }
+            
+            currentPosition++;
+            previous_c = current_c;
+          }
+          
+          // this alternative for reading seems not work
+          // maybe a future firmware version will fix this...
+          // might be faster, but never the less with the problem that splitting 
+          // header from body and parsing for error codes right here will no longer be possible 
+          // readbytes = myClient.read((uint8_t*) &response[responsePosition], bytes);
+          // responsePosition = responsePosition + bytes;
+          
+          bytes = myClient.available();
+      }
+      
+      Serial.print("Received: ");
+      Serial.println(responsePosition);
+      
+      myClient.flush();
+      myClient.stop();
+      
+      if (error) {
+        return -1;
+      }
+
+  } else {
+      // unable to connect
+      return -1; 
+  }
+  return responsePosition;
+}
+
